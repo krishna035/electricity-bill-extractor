@@ -69,7 +69,11 @@ class UGVCLParser(ProviderParser):
                     tariff = header_row.group(2).upper()
                     values["tariff_category"] = "HTP-I" if re.fullmatch(r"[A-Z]*TP-[1I]", tariff) else tariff
 
-        meter = re.search(r"Meter\s+No:[^\n]*\n\s*([A-Z0-9/-]{4,})", text, re.I)
+        meter = re.search(
+            r"Meter\s+No:[\s\S]{0,320}?\n\s*([A-Z][A-Z0-9/-]*\d[A-Z0-9/-]*)\b",
+            text,
+            re.I,
+        )
         if meter:
             values["meter_number"] = meter.group(1)
 
@@ -221,6 +225,22 @@ class UGVCLParser(ProviderParser):
 
     @staticmethod
     def _parse_adjustments(text: str, values: dict[str, str | float | None]) -> None:
+        # Newer UGVCL PDFs position the final word of some descriptions after
+        # the amount/remarks columns in extracted reading order. Normalize
+        # those visually single-row entries before applying the row parser.
+        wrapped_entry = re.compile(
+            rf"^\s*(Credit\s+(?:Board|ED)|Debit\s+Banking)\s*\n\s*"
+            rf"({NUMBER_TOKEN})\s+({NUMBER_TOKEN})\s+([^\n]+)\n\s*(Charges?)\s*$",
+            re.I | re.M,
+        )
+        text = wrapped_entry.sub(
+            lambda match: (
+                f"{match.group(1)} {match.group(5)} {match.group(2)} "
+                f"{match.group(3)} {match.group(4)}"
+            ),
+            text,
+        )
+
         def adjustment_units(remarks: str, fallback: float) -> float:
             multiplied = re.search(r"\(\s*(\d[\d,]*)\s*[Xx×]", remarks)
             if multiplied:
@@ -234,7 +254,7 @@ class UGVCLParser(ProviderParser):
         solar_export_units = 0.0
         banking_amount = 0.0
         banking_units = 0.0
-        other_credits = 0.0
+        other_adjustments = 0.0
         security_interest = 0.0
         debit_tcs = 0.0
         found_adjustment = False
@@ -242,7 +262,8 @@ class UGVCLParser(ProviderParser):
         entry = re.compile(
             rf"^\s*(Credit\s+Board\s+Charges|Credit\s+ED\s+Charges|Credit\s+TDS|"
             rf"Cedit\s+Fuel\s+Surcharge|Credit\s+Fuel\s+Surcharge|Credit\s+JV|"
-            rf"Debit\s+Banking\s+Charge|Debit\s+TCS)\s+({NUMBER_TOKEN})\s+"
+            rf"Debit\s+Banking\s+Charges?|Debit\s+Electricity\s+Duty|"
+            rf"Debit\s+Fuel\s+Surcharge|Debit\s+TCS)\s+({NUMBER_TOKEN})\s+"
             rf"(?:[A-Z]{{1,4}}\s+)?({NUMBER_TOKEN})\s+(.+)$",
             re.I,
         )
@@ -262,7 +283,7 @@ class UGVCLParser(ProviderParser):
             )
             if (
                 "SOLAR SETOFF" in upper_remarks
-                or re.search(r"\bSOLAR\s+[A-Z]{3}\s+\d{2}\b", upper_remarks)
+                or re.search(r"\bSOLAR\s+(?:BOARD\s+CHARGE\s+|ELEC\.?\s+DUTY\s+)?ADJ\b", upper_remarks)
                 or is_s21_setoff
             ):
                 solar_setoff_amount += amount
@@ -278,7 +299,9 @@ class UGVCLParser(ProviderParser):
             elif description.lower().startswith("debit tcs"):
                 debit_tcs += amount
             elif description.lower().startswith(("credit", "cedit")):
-                other_credits += amount
+                other_adjustments -= amount
+            elif description.lower().startswith("debit"):
+                other_adjustments += amount
 
         if not found_adjustment:
             return
@@ -288,7 +311,7 @@ class UGVCLParser(ProviderParser):
         values["solar_credit"] = -solar_export_amount if solar_export_amount else 0.0
         values["solar_banking_units"] = banking_units
         values["solar_banking_charges"] = banking_amount
-        values["other_credits"] = -other_credits if other_credits else 0.0
+        values["other_credits"] = other_adjustments
         values["security_deposit_interest"] = -security_interest if security_interest else 0.0
         if debit_tcs:
             values["tcs"] = debit_tcs

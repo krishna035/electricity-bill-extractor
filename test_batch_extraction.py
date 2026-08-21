@@ -4,6 +4,8 @@ from openpyxl import load_workbook
 import pytest
 
 from bill_extractor.export import export_excel
+from bill_extractor.document import extract_pages
+from bill_extractor.providers.ugvcl import UGVCLParser
 from bill_extractor.schema import FIELDS
 from bill_extractor.service import InputFile, extract_files
 
@@ -120,6 +122,78 @@ def test_percentage_columns_use_excel_percentage_format():
 
     assert sheet.cell(2, solar_export_column).value == pytest.approx(0.131935654)
     assert sheet.cell(2, solar_export_column).number_format == "0.00%"
+
+
+def test_sparse_selectable_text_page_does_not_trigger_ocr():
+    import fitz
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "This is a system generated bill. Hence no signature required.")
+    data = document.tobytes()
+    document.close()
+
+    pages, warnings = extract_pages(data, "footer.pdf", use_ocr=True)
+
+    assert pages[0].text.strip() == "This is a system generated bill. Hence no signature required."
+    assert not pages[0].used_ocr
+    assert not warnings
+
+
+def test_ugvcl_wrapped_meter_and_adjustments_are_parsed():
+    text = """
+HT BILL FOR THE MONTH OF : APR-2026
+Meter No: Make CTPT Make CTPT Srno CT Ratio PT Ratio Meter Status
+Meter
+Constant
+GHBD0736 L&T 15 Normal
+Adjustment Details Report for APR-2026/td>
+Credit Board
+39577.20 0.00 CREDIT BC FOR CONSUMPTION BETWEEN 11 AM TO 3 PM, MONTH-MAR-26, UNIT-65962
+Charges
+Credit Board
+234.38 35.00 SOLAR ADJ FOR THE MONTH OF -MAR-26
+Charges
+Credit ED
+4382.97 0.00 CREDIT ED FOR CONSUMPTION BETWEEN 11 AM TO 3 PM, MONTH-MAR-26, UNIT-65962
+Charges
+Credit ED
+25.96 0.00 SOLAR ADJ FOR THE MONTH OF -MAR-26
+Charges
+Credit TDS 3202.00 0.00 TDS ADJUSTMENT 3-2026
+Debit Banking
+14016.00 0.00 SOLAR BANKING CHARGES FOR THE MONTH - MAR-26, UNIT-9344
+Charge
+"""
+
+    values = UGVCLParser().parse(text)
+
+    assert values["meter_number"] == "GHBD0736"
+    assert values["solar_setoff_units"] == 35
+    assert values["solar_setoff_credit"] == pytest.approx(-260.34)
+    assert values["solar_banking_units"] == 9344
+    assert values["solar_banking_charges"] == 14016
+    assert values["other_credits"] == pytest.approx(-47162.17)
+    assert values["security_deposit_interest"] == 0
+
+
+def test_ugvcl_other_debits_reconcile_adjustment():
+    text = """
+Adjustment Details Report for OCT-2025/td>
+Credit Board Charges 848.74 127.00 SOLAR ADJ SEP-25
+Credit ED Charges 93.77 0.00 SOLAR ADJ SEP-25
+Credit TDS 3625.00 0.00 TDS ADJUSTMENT 9-2025
+Debit Banking Charge 12012.00 0.00 SOLAR BANKING CHARGE SEP-25,U-8008
+Debit Electricity Duty 0.05 0.00 ED RECOVERY AGAINST FC
+Debit Fuel Surcharge 0.45 0.00 FC RECOVERY IN SOLAR SET OFF FOR THE MONTH OF JULY-25
+"""
+
+    values = UGVCLParser().parse(text)
+
+    assert values["solar_setoff_units"] == 127
+    assert values["solar_setoff_credit"] == pytest.approx(-942.51)
+    assert values["solar_banking_units"] == 8008
+    assert values["other_credits"] == pytest.approx(-3624.50)
 
 
 def test_photographed_bill_and_adjustment_are_merged():

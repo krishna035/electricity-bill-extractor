@@ -26,7 +26,14 @@ def extract_pages(data: bytes, filename: str, use_ocr: bool = True) -> tuple[lis
         for index, page in enumerate(document):
             text = page.get_text("text", sort=True)
             used_ocr = False
-            if use_ocr and len(text.strip()) < 80:
+            # Sparse selectable-text pages (for example a continuation page
+            # containing only the generated-bill footer) do not benefit from
+            # OCR. Scanned pages have no text and normally contain a raster
+            # image, so they still take the OCR path.
+            needs_ocr = len(text.strip()) < 80 and (
+                not text.strip() or bool(page.get_image_info())
+            )
+            if use_ocr and needs_ocr:
                 try:
                     text_page = page.get_textpage_ocr(language="eng", dpi=300, full=True)
                     text = page.get_text("text", textpage=text_page, sort=True)

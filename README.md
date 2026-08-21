@@ -30,10 +30,13 @@ Open the local address printed by Streamlit, normally
 
 ## OCR behavior
 
-PyMuPDF extracts the embedded text layer first. Pages with less than 80 useful
-characters are sent to OCR. The tool uses Tesseract when it is available and
-automatically falls back to the bundled offline RapidOCR engine otherwise.
-No external OCR executable is required for JPG, PNG, or scanned-PDF uploads.
+PyMuPDF extracts the embedded text layer first. Rasterized pages with less than
+80 useful characters are sent to OCR; sparse selectable-text continuation pages
+are retained without unnecessary OCR. The tool uses Tesseract when it is
+available and automatically falls back to the bundled offline RapidOCR engine
+otherwise. No external OCR executable is required for JPG, PNG, or scanned-PDF
+uploads. Linux Streamlit deployments install the OpenCV `libGL` runtime declared
+in `packages.txt`.
 
 Photographs take longer than selectable-text PDFs because OCR runs locally.
 For multi-page bills uploaded as separate images, matching provider, customer,
