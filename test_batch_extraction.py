@@ -1,4 +1,5 @@
 from pathlib import Path
+from copy import deepcopy
 
 from openpyxl import load_workbook
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from bill_extractor.export import export_excel
 from bill_extractor.document import extract_pages
 from bill_extractor.providers.ugvcl import UGVCLParser
+from bill_extractor.presentation import display_dataframe
 from bill_extractor.schema import FIELDS
 from bill_extractor.service import InputFile, extract_files
 
@@ -122,6 +124,26 @@ def test_percentage_columns_use_excel_percentage_format():
 
     assert sheet.cell(2, solar_export_column).value == pytest.approx(0.131935654)
     assert sheet.cell(2, solar_export_column).number_format == "0.00%"
+
+
+def test_streamlit_preview_is_arrow_safe_with_mixed_missing_and_numeric_values():
+    records = extract_files(
+        [InputFile("S P METAL PGVCL.pdf", Path("S P METAL PGVCL.pdf").read_bytes())],
+        use_ocr=False,
+    )
+    records.append(deepcopy(records[0]))
+    records[1].values["kwh_increase_percent"] = 0.125
+
+    frame = display_dataframe(records)
+
+    assert all(str(dtype) == "string" for dtype in frame.dtypes)
+    assert frame["% Increase in kWh"].tolist() == ["-", "0.125"]
+    assert "% of Total units (Night)" in frame.columns
+    assert "% of Total units (TOU)" in frame.columns
+    assert frame.columns.is_unique
+
+    pyarrow = pytest.importorskip("pyarrow")
+    pyarrow.Table.from_pandas(frame)
 
 
 def test_sparse_selectable_text_page_does_not_trigger_ocr():

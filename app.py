@@ -1,10 +1,9 @@
 """Streamlit interface for batch electricity-bill extraction."""
 
-import pandas as pd
 import streamlit as st
 
 from bill_extractor.export import export_excel, export_json
-from bill_extractor.schema import FIELDS
+from bill_extractor.presentation import display_dataframe
 from bill_extractor.service import InputFile, extract_files
 
 
@@ -36,19 +35,7 @@ if uploaded_files:
             st.error("No bills were found in the uploaded files.")
         else:
             st.success(f"Extracted {len(records)} bill(s) from {len(uploaded_files)} file(s).")
-            table = []
-            for record in records:
-                row = {}
-                for field in FIELDS:
-                    value = record.values.get(field.key)
-                    if value is None:
-                        row[field.label] = "-"
-                    elif field.kind == "percent":
-                        row[field.label] = f"{float(value):.2%}"
-                    else:
-                        row[field.label] = value
-                table.append(row)
-            st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+            st.dataframe(display_dataframe(records), use_container_width=True, hide_index=True)
 
             left, right = st.columns(2)
             with left:
