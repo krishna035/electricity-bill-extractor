@@ -57,7 +57,12 @@ def calculate_record(values: dict[str, str | float | None]) -> None:
     fill("consumption_unit_rate", safe_divide(total_consumption, kwh))
     fill(
         "consumption_demand_unit_rate",
-        safe_divide(sum_known(total_consumption, demand), kwh),
+        safe_divide(
+            total_consumption - demand
+            if total_consumption is not None and demand is not None
+            else None,
+            kwh,
+        ),
     )
     fill(
         "net_less_demand_unit_rate",

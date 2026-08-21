@@ -103,7 +103,11 @@ class TorrentParser(ProviderParser):
             text,
             rf"B\s*I\s*L\s*L\s+A\s*M\s*O\s*U\s*N\s*T\s*:\s*R\s*({NUMBER_TOKEN})",
         )
-        values["total_payable"] = parse_number(bill_amount)
+        values["total_payable"] = (
+            values["net_payable"]
+            if values["net_payable"] is not None
+            else parse_number(bill_amount)
+        )
         values["current_month_bill"] = sum_known(
             values["total_consumption_charges"], values["electricity_duty"]
         )

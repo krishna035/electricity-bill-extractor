@@ -221,6 +221,13 @@ class UGVCLParser(ProviderParser):
 
     @staticmethod
     def _parse_adjustments(text: str, values: dict[str, str | float | None]) -> None:
+        def adjustment_units(remarks: str, fallback: float) -> float:
+            multiplied = re.search(r"\(\s*(\d[\d,]*)\s*[Xx×]", remarks)
+            if multiplied:
+                return parse_number(multiplied.group(1)) or fallback
+            unit_values = re.findall(r"\d[\d,]*(?:\.\d+)?", remarks)
+            return parse_number(unit_values[-1]) if unit_values else fallback
+
         solar_setoff_amount = 0.0
         solar_setoff_units = 0.0
         solar_export_amount = 0.0
@@ -233,8 +240,9 @@ class UGVCLParser(ProviderParser):
         found_adjustment = False
 
         entry = re.compile(
-            rf"^\s*(Credit\s+Board\s+Charges|Cedit\s+Fuel\s+Surcharge|Credit\s+Fuel\s+Surcharge|"
-            rf"Credit\s+JV|Debit\s+Banking\s+Charge|Debit\s+TCS)\s+({NUMBER_TOKEN})\s+"
+            rf"^\s*(Credit\s+Board\s+Charges|Credit\s+ED\s+Charges|Credit\s+TDS|"
+            rf"Cedit\s+Fuel\s+Surcharge|Credit\s+Fuel\s+Surcharge|Credit\s+JV|"
+            rf"Debit\s+Banking\s+Charge|Debit\s+TCS)\s+({NUMBER_TOKEN})\s+"
             rf"(?:[A-Z]{{1,4}}\s+)?({NUMBER_TOKEN})\s+(.+)$",
             re.I,
         )
@@ -247,17 +255,24 @@ class UGVCLParser(ProviderParser):
             amount = parse_number(amount_text) or 0.0
             units = parse_number(units_text) or 0.0
             upper_remarks = remarks.upper()
-            if "SOLAR SETOFF" in upper_remarks or re.search(r"\bSOLAR\s+[A-Z]{3}\s+\d{2}\b", upper_remarks):
+            is_s21_setoff = bool(re.search(r"\bS-?21\s+CR\s+BC\b", upper_remarks))
+            is_s21_surplus = bool(re.search(r"\bS-?21\s+CR\s+SURPLUS\b", upper_remarks))
+            is_s21_banking = "S-21 DR" in upper_remarks and (
+                "BANKING" in upper_remarks or "BNAKING" in upper_remarks
+            )
+            if (
+                "SOLAR SETOFF" in upper_remarks
+                or re.search(r"\bSOLAR\s+[A-Z]{3}\s+\d{2}\b", upper_remarks)
+                or is_s21_setoff
+            ):
                 solar_setoff_amount += amount
                 solar_setoff_units += units
-            elif "SOLAR SURPLUS" in upper_remarks or "SOLAR SPU" in upper_remarks:
+            elif "SOLAR SURPLUS" in upper_remarks or "SOLAR SPU" in upper_remarks or is_s21_surplus:
                 solar_export_amount += amount
-                unit_values = re.findall(r"\d[\d,]*(?:\.\d+)?", remarks)
-                solar_export_units += parse_number(unit_values[-1]) if unit_values else units
-            elif "SOLAR B.U." in upper_remarks or "SOLAR BANKING" in upper_remarks:
+                solar_export_units += adjustment_units(remarks, units)
+            elif "SOLAR B.U." in upper_remarks or "SOLAR BANKING" in upper_remarks or is_s21_banking:
                 banking_amount += amount
-                unit_values = re.findall(r"\d[\d,]*(?:\.\d+)?", remarks)
-                banking_units += parse_number(unit_values[-1]) if unit_values else units
+                banking_units += adjustment_units(remarks, units)
             elif "SD INTEREST" in upper_remarks:
                 security_interest += amount
             elif description.lower().startswith("debit tcs"):

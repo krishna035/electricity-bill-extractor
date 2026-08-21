@@ -73,8 +73,26 @@ def test_torrent_power_parser():
     assert values["electricity_duty"] == 359765.81
     assert values["solar_generation_units"] == 37805
     assert values["solar_net_billed_units"] == 249139
-    assert values["total_payable"] == 2779320
+    assert values["total_payable"] == 2779320.78
     assert not record.warnings
+
+
+@pytest.mark.parametrize(
+    ("filename", "amount_due"),
+    [
+        ("JAN 26.pdf", 2779320.78),
+        ("FEB 26.pdf", 2858661.96),
+    ],
+)
+def test_torrent_uses_precise_amount_due_and_excludes_demand_from_bd(filename, amount_due):
+    record = extract(filename)[0]
+    values = record.values
+
+    assert values["total_payable"] == pytest.approx(amount_due)
+    assert values["consumption_demand_unit_rate"] == pytest.approx(
+        (values["total_consumption_charges"] - values["demand_charges"])
+        / values["kwh_consumed"]
+    )
 
 
 def test_excel_export_uses_reference_headers_and_missing_marker():
@@ -125,4 +143,44 @@ def test_photographed_bill_and_adjustment_are_merged():
     assert values["solar_banking_units"] == 71442
     assert values["net_payable"] == 295385.72
     assert values["total_payable"] == 295385.72
+    assert not record.warnings
+
+
+@pytest.mark.parametrize(
+    ("filename", "setoff", "export", "banking", "banking_charge", "solar_credit", "setoff_credit", "other_credit"),
+    [
+        ("1_APRIL-2025.pdf", 528, 202, 35318, 52977.00, -333.30, -3405.60, -1618.84),
+        ("2_MAY-2025.pdf", 820, 1425, 53095, 79642.50, -2351.25, -5315.24, -3571.71),
+        ("3_JUNE-2025.pdf", 869, 1613, 51788, 77682.00, -2661.45, -5570.29, -835.54),
+        ("4_JULY-2025.pdf", 1137, 719, 55333, 82999.50, -1186.35, -7219.95, -5259.99),
+        ("5_AUG-2025.pdf", 1731, 607, 27986, 41979.00, -1001.55, -10960.69, -1644.10),
+    ],
+)
+def test_s21_ugvcl_adjustments(
+    filename,
+    setoff,
+    export,
+    banking,
+    banking_charge,
+    solar_credit,
+    setoff_credit,
+    other_credit,
+):
+    record = extract(filename)[0]
+    values = record.values
+
+    assert values["solar_setoff_units"] == setoff
+    assert values["solar_export_units"] == export
+    assert values["solar_banking_units"] == banking
+    assert values["solar_generation_units"] == export + banking
+    assert values["solar_net_billed_units"] == values["kwh_consumed"] - setoff
+    assert values["solar_banking_charges"] == pytest.approx(banking_charge)
+    assert values["solar_credit"] == pytest.approx(solar_credit)
+    assert values["solar_setoff_credit"] == pytest.approx(setoff_credit)
+    assert values["other_credits"] == pytest.approx(other_credit)
+    assert values["calculated_adjustment"] == pytest.approx(values["advance_adjustment"])
+    assert values["net_less_demand_unit_rate"] == pytest.approx(
+        (values["total_payable"] - values["demand_charges"])
+        / values["solar_net_billed_units"]
+    )
     assert not record.warnings

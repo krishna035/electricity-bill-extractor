@@ -23,6 +23,14 @@ def validate(record: BillRecord) -> None:
         if abs(float(generation) - float(export) - float(banking)) > 1:
             record.warnings.append("Solar generation does not equal export plus banking units.")
 
+    extracted_adjustment = numeric("advance_adjustment")
+    calculated_adjustment = numeric("calculated_adjustment")
+    if extracted_adjustment is not None and calculated_adjustment is not None:
+        if abs(extracted_adjustment - calculated_adjustment) > 0.02:
+            record.warnings.append(
+                "Calculated adjustment does not match the adjustment printed on the bill."
+            )
+
     found = sum(value is not None for value in values.values())
     if found < 12:
         record.warnings.append(f"Only {found} of {len(values)} fields were populated; review this layout.")
