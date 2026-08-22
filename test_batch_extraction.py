@@ -22,10 +22,27 @@ def extract(filename: str):
 
 def test_schema_matches_reference_workbook():
     workbook = load_workbook(DATA / "Angiplast_Bill_Analysis.xlsx", read_only=True)
-    headers = [cell.value for cell in workbook["Angiplast"][1]][: len(FIELDS)]
+    expected = [cell.value for cell in workbook["Angiplast"][1]][:58]
 
-    assert len(FIELDS) == 58
-    assert headers == [field.label for field in FIELDS]
+    fuel_percent_index = expected.index("Fuel Surcharge %") + 1
+    expected[fuel_percent_index:fuel_percent_index] = ["Base FPPAS", "FPPAS Charges", "FPPAS %"]
+    previous_dues_index = expected.index("Previous Dues") + 1
+    expected[previous_dues_index:previous_dues_index] = [
+        "Electricity Duty Credits",
+        "TOU Charge Credits",
+        "TDS Credits",
+    ]
+    expected.remove("Security Deposit Interest")
+    expected.insert(expected.index("Other Credits"), "Security Deposit Interest")
+    unit_rate_index = expected.index("Unit Rate (Total Consumption Charge)")
+    demand_unit_rate_index = expected.index("Total Consumption-Demand Charge Unit Rate\n\n")
+    expected[unit_rate_index], expected[demand_unit_rate_index] = (
+        expected[demand_unit_rate_index],
+        expected[unit_rate_index],
+    )
+
+    assert len(FIELDS) == 64
+    assert expected == [field.label for field in FIELDS]
 
 
 def test_ugvcl_merged_bill_matches_reference_readings():
@@ -74,6 +91,9 @@ def test_torrent_power_parser():
     assert values["billing_demand"] == 765
     assert values["kwh_consumed"] == 249690
     assert values["fuel_surcharge"] == 1003612.58
+    assert values["base_fppas"] == 926797.08
+    assert values["fppas_charges"] == 76815.50
+    assert values["fppas_percent"] == pytest.approx(0.034)
     assert values["electricity_duty"] == 359765.81
     assert values["solar_generation_units"] == 37805
     assert values["solar_net_billed_units"] == 249139
@@ -192,10 +212,13 @@ Charge
 
     assert values["meter_number"] == "GHBD0736"
     assert values["solar_setoff_units"] == 35
-    assert values["solar_setoff_credit"] == pytest.approx(-260.34)
+    assert values["solar_setoff_credit"] == pytest.approx(-234.38)
+    assert values["electricity_duty_credits"] == pytest.approx(-4408.93)
+    assert values["tou_charge_credits"] == pytest.approx(-39577.20)
+    assert values["tds_credits"] == pytest.approx(-3202.00)
     assert values["solar_banking_units"] == 9344
     assert values["solar_banking_charges"] == 14016
-    assert values["other_credits"] == pytest.approx(-47162.17)
+    assert values["other_credits"] == 0
     assert values["security_deposit_interest"] == 0
 
 
@@ -213,9 +236,11 @@ Debit Fuel Surcharge 0.45 0.00 FC RECOVERY IN SOLAR SET OFF FOR THE MONTH OF JUL
     values = UGVCLParser().parse(text)
 
     assert values["solar_setoff_units"] == 127
-    assert values["solar_setoff_credit"] == pytest.approx(-942.51)
+    assert values["solar_setoff_credit"] == pytest.approx(-848.74)
+    assert values["electricity_duty_credits"] == pytest.approx(-93.77)
+    assert values["tds_credits"] == pytest.approx(-3625.00)
     assert values["solar_banking_units"] == 8008
-    assert values["other_credits"] == pytest.approx(-3624.50)
+    assert values["other_credits"] == pytest.approx(0.50)
 
 
 def test_photographed_bill_and_adjustment_are_merged():
@@ -243,13 +268,24 @@ def test_photographed_bill_and_adjustment_are_merged():
 
 
 @pytest.mark.parametrize(
-    ("filename", "setoff", "export", "banking", "banking_charge", "solar_credit", "setoff_credit", "other_credit"),
+    (
+        "filename",
+        "setoff",
+        "export",
+        "banking",
+        "banking_charge",
+        "solar_credit",
+        "setoff_credit",
+        "electricity_duty_credit",
+        "tds_credit",
+        "other_credit",
+    ),
     [
-        ("1_APRIL-2025.pdf", 528, 202, 35318, 52977.00, -333.30, -3405.60, -1618.84),
-        ("2_MAY-2025.pdf", 820, 1425, 53095, 79642.50, -2351.25, -5315.24, -3571.71),
-        ("3_JUNE-2025.pdf", 869, 1613, 51788, 77682.00, -2661.45, -5570.29, -835.54),
-        ("4_JULY-2025.pdf", 1137, 719, 55333, 82999.50, -1186.35, -7219.95, -5259.99),
-        ("5_AUG-2025.pdf", 1731, 607, 27986, 41979.00, -1001.55, -10960.69, -1644.10),
+        ("1_APRIL-2025.pdf", 528, 202, 35318, 52977.00, -333.30, -3405.60, -510.84, -1108.00, 0.00),
+        ("2_MAY-2025.pdf", 820, 1425, 53095, 79642.50, -2351.25, -5315.24, -1159.17, 0.00, -2412.54),
+        ("3_JUNE-2025.pdf", 869, 1613, 51788, 77682.00, -2661.45, -5570.29, -835.54, 0.00, 0.00),
+        ("4_JULY-2025.pdf", 1137, 719, 55333, 82999.50, -1186.35, -7219.95, -1082.99, -4177.00, 0.00),
+        ("5_AUG-2025.pdf", 1731, 607, 27986, 41979.00, -1001.55, -10960.69, -1644.10, 0.00, 0.00),
     ],
 )
 def test_s21_ugvcl_adjustments(
@@ -260,6 +296,8 @@ def test_s21_ugvcl_adjustments(
     banking_charge,
     solar_credit,
     setoff_credit,
+    electricity_duty_credit,
+    tds_credit,
     other_credit,
 ):
     record = extract(filename)[0]
@@ -273,6 +311,8 @@ def test_s21_ugvcl_adjustments(
     assert values["solar_banking_charges"] == pytest.approx(banking_charge)
     assert values["solar_credit"] == pytest.approx(solar_credit)
     assert values["solar_setoff_credit"] == pytest.approx(setoff_credit)
+    assert values["electricity_duty_credits"] == pytest.approx(electricity_duty_credit)
+    assert values["tds_credits"] == pytest.approx(tds_credit)
     assert values["other_credits"] == pytest.approx(other_credit)
     assert values["calculated_adjustment"] == pytest.approx(values["advance_adjustment"])
     assert values["net_less_demand_unit_rate"] == pytest.approx(

@@ -255,6 +255,9 @@ class UGVCLParser(ProviderParser):
         banking_amount = 0.0
         banking_units = 0.0
         other_adjustments = 0.0
+        electricity_duty_credits = 0.0
+        tou_charge_credits = 0.0
+        tds_credits = 0.0
         security_interest = 0.0
         debit_tcs = 0.0
         found_adjustment = False
@@ -281,13 +284,25 @@ class UGVCLParser(ProviderParser):
             is_s21_banking = "S-21 DR" in upper_remarks and (
                 "BANKING" in upper_remarks or "BNAKING" in upper_remarks
             )
-            if (
+            description_lower = description.lower()
+            is_credit_board = description_lower.startswith("credit board")
+            is_credit_ed = description_lower.startswith("credit ed")
+            is_credit_tds = description_lower.startswith("credit tds")
+            is_tou_credit = "11 AM TO 3 PM" in upper_remarks or "TOU" in upper_remarks
+            is_solar_setoff = (
                 "SOLAR SETOFF" in upper_remarks
                 or re.search(r"\bSOLAR\s+(?:BOARD\s+CHARGE\s+|ELEC\.?\s+DUTY\s+)?ADJ\b", upper_remarks)
                 or is_s21_setoff
-            ):
+            )
+            if is_credit_ed:
+                electricity_duty_credits -= amount
+            elif is_credit_tds:
+                tds_credits -= amount
+            elif is_credit_board and is_solar_setoff:
                 solar_setoff_amount += amount
                 solar_setoff_units += units
+            elif is_credit_board and is_tou_credit:
+                tou_charge_credits -= amount
             elif "SOLAR SURPLUS" in upper_remarks or "SOLAR SPU" in upper_remarks or is_s21_surplus:
                 solar_export_amount += amount
                 solar_export_units += adjustment_units(remarks, units)
@@ -296,11 +311,11 @@ class UGVCLParser(ProviderParser):
                 banking_units += adjustment_units(remarks, units)
             elif "SD INTEREST" in upper_remarks:
                 security_interest += amount
-            elif description.lower().startswith("debit tcs"):
+            elif description_lower.startswith("debit tcs"):
                 debit_tcs += amount
-            elif description.lower().startswith(("credit", "cedit")):
+            elif description_lower.startswith(("credit", "cedit")):
                 other_adjustments -= amount
-            elif description.lower().startswith("debit"):
+            elif description_lower.startswith("debit"):
                 other_adjustments += amount
 
         if not found_adjustment:
@@ -311,6 +326,9 @@ class UGVCLParser(ProviderParser):
         values["solar_credit"] = -solar_export_amount if solar_export_amount else 0.0
         values["solar_banking_units"] = banking_units
         values["solar_banking_charges"] = banking_amount
+        values["electricity_duty_credits"] = electricity_duty_credits
+        values["tou_charge_credits"] = tou_charge_credits
+        values["tds_credits"] = tds_credits
         values["other_credits"] = other_adjustments
         values["security_deposit_interest"] = -security_interest if security_interest else 0.0
         if debit_tcs:

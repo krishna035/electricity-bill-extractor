@@ -70,13 +70,17 @@ class TorrentParser(ProviderParser):
         values["energy_charges"] = self._amount(text, r"Energy\s+charges\s*\(A\)")
         values["demand_charges"] = self._amount(text, r"Fixed\s+demand\s+charges\s*\(B\)")
         values["excess_demand_charges"] = self._amount(text, r"Excess\s+demand\s+charges")
-        base_fppas = self._amount(text, r"Base\s+FPPAS[^\n]*\(C\)")
-        additional_fppas_text = self._find(
+        values["base_fppas"] = self._amount(text, r"Base\s+FPPAS[^\n]*\(C\)")
+        additional_fppas_match = re.search(
+            rf"FPPAS\s+charges\s+@\s+({NUMBER_TOKEN})%\s+of\s+\(A\+B\+C\)\s+({NUMBER_TOKEN})",
             text,
-            rf"FPPAS\s+charges\s+@\s+{NUMBER_TOKEN}%\s+of\s+\(A\+B\+C\)\s+({NUMBER_TOKEN})",
+            re.I,
         )
-        additional_fppas = parse_number(additional_fppas_text)
-        values["fuel_surcharge"] = sum_known(base_fppas, additional_fppas)
+        if additional_fppas_match:
+            percentage = parse_number(additional_fppas_match.group(1))
+            values["fppas_charges"] = parse_number(additional_fppas_match.group(2))
+            values["fppas_percent"] = percentage / 100 if percentage is not None else None
+        values["fuel_surcharge"] = sum_known(values["base_fppas"], values["fppas_charges"])
         values["tou_charges"] = self._amount(text, r"TOU\s+charges")
         values["power_factor_adjustment"] = self._amount(text, r"Power\s+Factor\s+adjustment\s+charges")
         values["night_rebate"] = self._amount(text, r"NTC\s+rebate")
